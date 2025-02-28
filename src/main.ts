@@ -389,75 +389,113 @@ export default class FindOrphanedFilesPlugin extends Plugin {
             new DeleteFilesModal(this.app, filesToDelete).open();
     }
 
-    findBrokenLinks() {
-        const outFileName = this.settings.unresolvedLinksOutputFileName + ".md";
-        const links: BrokenLink[] = [];
-        const brokenLinks = this.app.metadataCache.unresolvedLinks;
+    async readIntegerFromFile() {
+        const fileName = 'broken links input'; // Name of the file to open
+        const file = this.app.vault.getAbstractFileByPath(fileName); // Get the file from vault
 
-        for (const sourceFilepath in brokenLinks) {
+        if (file instanceof TFile) {
+            try {
+                const fileContent = await this.app.vault.read(file); // Read file content
+                const parsedInteger = parseInt(fileContent.trim(), 10); // Parse the content as an integer
+
+                if (isNaN(parsedInteger)) {
+                    new Notice('The file does not contain a valid integer.');
+                    return null; // If the file doesn't contain a valid integer
+                }
+                
+                return parsedInteger; // Return the integer value
+            } catch (error) {
+                console.error('Error reading the file:', error);
+                new Notice('An error occurred while reading the file.');
+                return null; // If there is an error while reading the file
+            }
+        } else {
+            new Notice('The file "broken links input" was not found.');
+            return null; // If the file does not exist
+        }
+    }
+
+findBrokenLinks() {
+    const outFileName = this.settings.unresolvedLinksOutputFileName + ".md";
+    const links: BrokenLink[] = [];
+    const brokenLinks = this.app.metadataCache.unresolvedLinks;
+    let brokenLinksCount = 0;  // Declare the counter variable
+    let brokenLinksInput = await this.readIntegerFromFile();
+
+    for (const sourceFilepath in brokenLinks) {
+        if (
+            sourceFilepath == this.settings.unresolvedLinksOutputFileName + ".md"
+        )
+            continue;
+
+        const fileType = sourceFilepath.substring(
+            sourceFilepath.lastIndexOf(".") + 1
+        );
+
+        const utils = new Utils(
+            this.app,
+            sourceFilepath,
+            this.settings.unresolvedLinksTagsToIgnore,
+            this.settings.unresolvedLinksLinksToIgnore,
+            this.settings.unresolvedLinksDirectoriesToIgnore,
+            this.settings.unresolvedLinksFilesToIgnore,
+            this.settings.unresolvedLinksIgnoreDirectories
+        );
+        if (utils.shouldIgnoreFile()) continue;
+
+        for (const link in brokenLinks[sourceFilepath]) {
+            const linkFileType = link.substring(link.lastIndexOf(".") + 1);
+
             if (
-                sourceFilepath ==
-                this.settings.unresolvedLinksOutputFileName + ".md"
+                this.settings.unresolvedLinksFileTypesToIgnore.contains(
+                    linkFileType
+                )
             )
                 continue;
 
-            const fileType = sourceFilepath.substring(
-                sourceFilepath.lastIndexOf(".") + 1
-            );
-
-            const utils = new Utils(
-                this.app,
-                sourceFilepath,
-                this.settings.unresolvedLinksTagsToIgnore,
-                this.settings.unresolvedLinksLinksToIgnore,
-                this.settings.unresolvedLinksDirectoriesToIgnore,
-                this.settings.unresolvedLinksFilesToIgnore,
-                this.settings.unresolvedLinksIgnoreDirectories
-            );
-            if (utils.shouldIgnoreFile()) continue;
-
-            for (const link in brokenLinks[sourceFilepath]) {
-                const linkFileType = link.substring(link.lastIndexOf(".") + 1);
-
-                if (
-                    this.settings.unresolvedLinksFileTypesToIgnore.contains(
-                        linkFileType
-                    )
-                )
-                    continue;
-
-                let formattedFilePath = sourceFilepath;
-                if (fileType == "md") {
-                    formattedFilePath = sourceFilepath.substring(
-                        0,
-                        sourceFilepath.lastIndexOf(".md")
-                    );
-                }
-                const brokenLink: BrokenLink = {
-                    files: [formattedFilePath],
-                    link: link,
-                };
-                if (links.contains(brokenLink)) continue;
-                const duplication = links.find((e) => e.link == link);
-                if (duplication) {
-                    duplication.files.push(formattedFilePath);
-                } else {
-                    links.push(brokenLink);
-                }
+            let formattedFilePath = sourceFilepath;
+            if (fileType == "md") {
+                formattedFilePath = sourceFilepath.substring(
+                    0,
+                    sourceFilepath.lastIndexOf(".md")
+                );
+            }
+            const brokenLink: BrokenLink = {
+                files: [formattedFilePath],
+                link: link,
+            };
+            if (links.contains(brokenLink)) continue;
+            const duplication = links.find((e) => e.link == link);
+            if (duplication) {
+                duplication.files.push(formattedFilePath);
+            } else {
+                links.push(brokenLink);
+                brokenLinksCount++;  // Increment the counter when a new broken link is added
             }
         }
-        Utils.writeAndOpenFile(
-            this.app,
-            outFileName,
-            [
-                "Don't forget that creating the file from here may create the file in the wrong directory!",
-                ...links.map(
-                    (e) => `- [[${e.link}]] in [[${e.files.join("]], [[")}]]`
-                ),
-            ].join("\n"),
-            this.settings.openOutputFile
-        );
     }
+
+let percentComplete = (100 - (brokenLinksCount / brokenLinksInput) * 100);
+
+Utils.writeAndOpenFile(
+    this.app,
+    outFileName,
+    [
+        `Lectures to go: ${brokenLinksCount}`, // Corrected string formatting
+        `Progress: ${percentComplete.toFixed(2)}%`, // Corrected string formatting with percentage and fixed to 2 decimal places
+        "Don't forget that creating the file from here may create the file in the wrong directory!",
+        ...links.map(
+            (e) => `- [[${e.link}]] in [[${e.files.join("]], [[")}]]`
+        ),
+    ].join("\n"),
+    this.settings.openOutputFile
+);
+
+// Display the count of broken links found
+new Notice(`Found ${brokenLinksCount} broken links.`);
+
+}
+
 
     findFilesWithoutTags() {
         const outFileName = this.settings.withoutTagsOutputFileName + ".md";
